@@ -1,1 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Mafia Mystery Game</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #111;
+      color: #eee;
+      text-align: center;
+    }
+    .screen { display: none; padding: 20px; }
+    .active { display: block; }
 
+    button {
+      padding: 10px 15px;
+      margin: 5px;
+      cursor: pointer;
+    }
+
+    .player-grid {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 10px;
+      margin-top: 20px;
+    }
+
+    .card {
+      background: #222;
+      border: 1px solid #444;
+      padding: 10px;
+      width: 120px;
+      cursor: pointer;
+    }
+
+    .dead {
+      opacity: 0.3;
+      text-decoration: line-through;
+    }
+
+    #log {
+      margin-top: 20px;
+      max-height: 200px;
+      overflow-y: auto;
+      background: #1a1a1a;
+      padding: 10px;
+    }
+  </style>
+</head>
+<body>
+
+<div id="startScreen" class="screen active">
+  <h1>🕵️ Mafia Mystery</h1>
+  <p>Choose your name:</p>
+  <input id="nameInput" placeholder="Your name" />
+  <button onclick="startGame()">Start Game</button>
+</div>
+
+<div id="roleScreen" class="screen">
+  <h2>Your Role</h2>
+  <h1 id="roleName"></h1>
+  <p id="roleDesc"></p>
+  <button onclick="beginRound()">Begin Game</button>
+</div>
+
+<div id="gameScreen" class="screen">
+  <h2>Round <span id="roundNum">1</span></h2>
+  <p id="statusText"></p>
+
+  <div id="actionArea"></div>
+
+  <h3>Players</h3>
+  <div id="players" class="player-grid"></div>
+
+  <div id="log"></div>
+
+  <button onclick="nextRound()">End Round</button>
+</div>
+
+<script>
+const roles = ["Killer","Detective","Doctor","Witch"];
+const roleInfo = {
+  Killer: "Kill one player each round",
+  Detective: "Investigate 3 players",
+  Doctor: "Protect one player",
+  Witch: "Block one player"
+};
+
+let game = {
+  players: [],
+  round: 1,
+  player: null,
+  actions: {}
+};
+
+function log(msg){
+  document.getElementById("log").innerHTML += `<div>${msg}</div>`;
+}
+
+function startGame(){
+  const name = document.getElementById("nameInput").value || "You";
+
+  const allNames = [name];
+  for(let i=0;i<9;i++) allNames.push("NPC"+(i+1));
+
+  const shuffledRoles = [...roles];
+  while(shuffledRoles.length < allNames.length) shuffledRoles.push("Innocent");
+  shuffledRoles.sort(()=>Math.random()-0.5);
+
+  game.players = allNames.map((n,i)=>({
+    name:n,
+    role:shuffledRoles[i],
+    alive:true
+  }));
+
+  game.player = game.players[0];
+
+  showRole();
+}
+
+function showRole(){
+  document.getElementById("startScreen").classList.remove("active");
+  document.getElementById("roleScreen").classList.add("active");
+
+  document.getElementById("roleName").innerText = game.player.role;
+  document.getElementById("roleDesc").innerText = roleInfo[game.player.role] || "No ability";
+}
+
+function beginRound(){
+  document.getElementById("roleScreen").classList.remove("active");
+  document.getElementById("gameScreen").classList.add("active");
+  updateUI();
+}
+
+function updateUI(){
+  document.getElementById("roundNum").innerText = game.round;
+
+  const container = document.getElementById("players");
+  container.innerHTML = "";
+
+  game.players.forEach((p,i)=>{
+    const div = document.createElement("div");
+    div.className = "card" + (p.alive ? "" : " dead");
+    div.innerText = p.name;
+
+    if(p.alive){
+      div.onclick = ()=>selectTarget(i);
+    }
+
+    container.appendChild(div);
+  });
+
+  showActions();
+}
+
+function showActions(){
+  const role = game.player.role;
+  const area = document.getElementById("actionArea");
+
+  if(role === "Killer") area.innerHTML = "Click a player to kill";
+  else if(role === "Doctor") area.innerHTML = "Click a player to heal";
+  else if(role === "Witch") area.innerHTML = "Click a player to block";
+  else if(role === "Detective") area.innerHTML = "Click 3 players to investigate";
+  else area.innerHTML = "No action";
+
+  game.actions = {};
+}
+
+function selectTarget(index){
+  const target = game.players[index];
+  if(!target.alive) return;
+
+  const role = game.player.role;
+
+  if(role === "Killer"){
+    game.actions.kill = index;
+    log("You marked " + target.name + " for death");
+  }
+
+  if(role === "Doctor"){
+    game.actions.heal = index;
+    log("You will heal " + target.name);
+  }
+
+  if(role === "Witch"){
+    game.actions.block = index;
+    log("You blocked " + target.name);
+  }
+
+  if(role === "Detective"){
+    if(!game.actions.invest) game.actions.invest = [];
+    if(game.actions.invest.length < 3){
+      game.actions.invest.push(index);
+      log("Investigated " + target.name);
+    }
+  }
+}
+
+function nextRound(){
+  // NPC actions
+  npcActions();
+
+  resolveRound();
+
+  game.round++;
+  updateUI();
+}
+
+function npcActions(){
+  const alive = game.players.map((p,i)=>({p,i})).filter(x=>x.p.alive);
+
+  const killer = alive[Math.floor(Math.random()*alive.length)];
+  game.pendingKill = killer.i;
+
+  const doctor = alive[Math.floor(Math.random()*alive.length)];
+  game.heal = doctor.i;
+}
+
+function resolveRound(){
+  // kill logic
+  const killTarget = game.pendingKill;
+  const healTarget = game.heal;
+
+  if(killTarget !== healTarget){
+    game.players[killTarget].alive = false;
+    log(game.players[killTarget].name + " was killed!");
+  } else {
+    log("A kill was prevented!");
+  }
+
+  // player kill
+  if(game.actions.kill !== undefined){
+    const t = game.actions.kill;
+    if(t !== healTarget){
+      game.players[t].alive = false;
+      log(game.players[t].name + " was killed by you!");
+    }
+  }
+
+  checkWin();
+}
+
+function checkWin(){
+  const alive = game.players.filter(p=>p.alive);
+  const killerAlive = alive.find(p=>p.role === "Killer");
+
+  if(!killerAlive){
+    alert("Good wins!");
+    location.reload();
+  }
+
+  if(alive.length <= 2){
+    alert("Killer wins!");
+    location.reload();
+  }
+}
+</script>
+
+</body>
+</html>
